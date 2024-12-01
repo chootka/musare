@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WSJT-X Packet Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>WSJT-X Packet Visualizer</h1>
+    <div id="sketch-holder"></div>
+
+    <script>
+        let packets = [];
+        const maxPackets = 100;
+        
+        function setup() {
+            const canvas = createCanvas(800, 400);
+            canvas.parent('sketch-holder');
+            background(26);
+            
+            // Connect to SSE stream
+            const eventSource = new EventSource('/stream');
+            eventSource.onmessage = function(event) {
+                const packet = JSON.parse(event.data);
+                packets.push(packet);
+                if (packets.length > maxPackets) {
+                    packets.shift();
+                }
+            };
+        }
+
+        function draw() {
+            background(26);
+            
+            // Draw grid
+            stroke(40);
+            for (let i = 0; i < width; i += 50) {
+                line(i, 0, i, height);
+            }
+            for (let i = 0; i < height; i += 50) {
+                line(0, i, width, i);
+            }
+            
+            // Draw packets
+            noStroke();
+            const packetWidth = width / maxPackets;
+            
+            packets.forEach((packet, index) => {
+                const x = index * packetWidth;
+                const h = map(packet.size, 0, 1024, 0, height);
+                
+                // Create gradient based on packet size
+                const hue = map(packet.size, 0, 1024, 0, 360);
+                colorMode(HSB);
+                fill(hue, 80, 100, 0.7);
+                
+                // Draw packet bar
+                rect(x, height - h, packetWidth - 1, h);
+                
+                // Draw packet data points
+                if (packet.raw_data) {
+                    stroke(hue, 80, 100);
+                    packet.raw_data.forEach((byte, byteIndex) => {
+                        const byteY = map(byte, 0, 255, height, 0);
+                        const byteX = x + (packetWidth * byteIndex / packet.raw_data.length);
+                        point(byteX, byteY);
+                    });
+                }
+            });
+            
+            // Draw info text
+            fill(255);
+            noStroke();
+            textAlign(LEFT, TOP);
+            text(`Packets: ${packets.length}`, 10, 10);
+            if (packets.length > 0) {
+                const latestPacket = packets[packets.length - 1];
+                text(`Latest packet size: ${latestPacket.size} bytes`, 10, 30);
+            }
+        }
+    </script>
+</body>
+</html>
