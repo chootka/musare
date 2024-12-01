@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WSJT-X Packet Visualizer</title>
+    <title>JS8 Packet Visualizer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
         body {
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>WSJT-X Packet Visualizer</h1>
+    <h1>JS8 Packet Visualizer</h1>
     <div id="sketch-holder"></div>
 
     <script>
@@ -28,14 +28,25 @@
             canvas.parent('sketch-holder');
             background(26);
             
-            // Connect to SSE stream
+            console.log("Setting up EventSource connection...");
             const eventSource = new EventSource('/stream');
+            
+            eventSource.onopen = function(event) {
+                console.log("EventSource connection opened");
+            };
+            
             eventSource.onmessage = function(event) {
+                console.log("Received packet data:", event.data);
                 const packet = JSON.parse(event.data);
                 packets.push(packet);
                 if (packets.length > maxPackets) {
                     packets.shift();
                 }
+                console.log("Total packets:", packets.length);
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error("EventSource error:", event);
             };
         }
 
@@ -83,9 +94,10 @@
             noStroke();
             textAlign(LEFT, TOP);
             text(`Packets: ${packets.length}`, 10, 10);
+            text(`FPS: ${frameRate().toFixed(1)}`, 10, 30);
             if (packets.length > 0) {
                 const latestPacket = packets[packets.length - 1];
-                text(`Latest packet size: ${latestPacket.size} bytes`, 10, 30);
+                text(`Latest packet size: ${latestPacket.size} bytes`, 10, 50);
             }
         }
     </script>
