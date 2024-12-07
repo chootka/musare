@@ -27,14 +27,13 @@ def listen_for_js8():
     try:
         print("Starting listener...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        server_address = ('127.0.0.1', 2237)
-        sock.connect(server_address)
+        print(f"Socket: {sock}")
+        sock.bind(('0.0.0.0', 2237))
         print("Connected to UDP server successfully")
         
         while True:
             try:
                 print("Receiving data...")
-                print(f"Socket: {sock}")
                 data = sock.recv(1024)
                 print(f"Received data: {data}")
                 timestamp = datetime.now().timestamp()
@@ -51,11 +50,11 @@ def listen_for_js8():
                 print(f"Received UDP packet: size={len(data)} bytes")
             except Exception as e:
                 print(f"Error receiving data: {e}")
-                break
+                time.sleep(1)
     except Exception as e:
-        print(f"Could not connect to UDP server: {e}")
-        print("Falling back to sample data...")
-        load_sample_data()
+        print(f"Could not set up UDP listener: {e}")
+        # print("Falling back to sample data...")
+        # load_sample_data()
 
 @app.route('/')
 def index():
@@ -75,8 +74,7 @@ def stream():
 
 if __name__ == '__main__':
     print("Starting server...")
-    # listener_thread = threading.Thread(target=listen_for_js8)
-    listener_thread = threading.Thread(target=load_sample_data)
+    listener_thread = threading.Thread(target=listen_for_js8)
     listener_thread.daemon = True
     listener_thread.start()
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
