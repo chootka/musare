@@ -34,7 +34,7 @@ def decode_wsjtx_message(data):
         # Unpack the header
         magic, schema, pkt_type = struct.unpack('>IIL', data[:12])
 
-        # print(f"Magic: {magic}, Schema: {schema}, Pkt Type: {pkt_type}")
+        print(f"Magic: {magic}, Schema: {schema}, Pkt Type: {pkt_type}")
         
         if magic != FT8_MAGIC:
             return None
@@ -144,6 +144,7 @@ def listen_for_packets():
                         'callsign': decoded['callsign'],
                         'decoded': decoded['raw_decode']
                     }
+                    print(f"Received FT8 packet: {packet}")
                     ft8_packets.append(packet)
                     if len(ft8_packets) > 100:
                         ft8_packets.pop(0)
