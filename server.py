@@ -9,6 +9,8 @@ import time
 app = Flask(__name__)
 message_queue = Queue()
 latest_packets = []
+JS8_PORT = 2242
+FT8_PORT = 2237
 
 def load_sample_data():
     try:
@@ -23,12 +25,12 @@ def load_sample_data():
     except Exception as e:
         print(f"Error loading sample data: {e}")
 
-def listen_for_js8():
+def listen_for_packets():
     try:
         print("Starting listener...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         print(f"Socket: {sock}")
-        sock.bind(('0.0.0.0', 2237))
+        sock.bind(('0.0.0.0', FT8_PORT))
         print("Connected to UDP server successfully")
         
         while True:
@@ -74,7 +76,7 @@ def stream():
 
 if __name__ == '__main__':
     print("Starting server...")
-    listener_thread = threading.Thread(target=listen_for_js8)
+    listener_thread = threading.Thread(target=listen_for_packets)
     listener_thread.daemon = True
     listener_thread.start()
     app.run(debug=True, use_reloader=False)
