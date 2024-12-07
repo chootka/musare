@@ -133,6 +133,8 @@ def listen_for_packets():
                 # FT8 packets
                 data, addr = wsjtx_sock.recvfrom(1024)
                 timestamp = datetime.now().timestamp()
+
+                print(f"Received FT8 data: {data}")
                 
                 decoded = decode_wsjtx_message(data)
                 if decoded:
