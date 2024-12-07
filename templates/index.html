@@ -38,6 +38,38 @@
         .pill-toggle button.active {
             background: #4CAF50;
         }
+        
+        .message-log {
+            margin-top: 20px;
+            background: #222;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        
+        .message-log .message {
+            padding: 5px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .message-log .message:last-child {
+            border-bottom: none;
+        }
+        
+        .message .time {
+            color: #888;
+        }
+        
+        .message .callsign {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .message .content {
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -50,6 +82,7 @@
         </div>
     </div>
     <div id="sketch-holder"></div>
+    <div class="message-log" id="message-log"></div>
 
     <script>
         let packets = [];
@@ -80,6 +113,28 @@
             connectEventSource();
         }
         
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleTimeString();
+        }
+        
+        function addMessageToLog(packet) {
+            const log = document.getElementById('message-log');
+            const message = document.createElement('div');
+            message.className = 'message';
+            message.innerHTML = `
+                <span class="time">${formatTimestamp(packet.timestamp)}</span>
+                <span class="callsign">${packet.callsign || 'UNKNOWN'}</span>
+                <span class="content">${packet.decoded || ''}</span>
+            `;
+            log.insertBefore(message, log.firstChild);
+            
+            // Keep only last 100 messages
+            while (log.children.length > 100) {
+                log.removeChild(log.lastChild);
+            }
+        }
+        
         function connectEventSource() {
             console.log(`Setting up EventSource connection for ${currentMode}...`);
             eventSource = new EventSource(`/stream?mode=${currentMode}`);
@@ -95,6 +150,7 @@
                     if (packets.length > maxPackets) {
                         packets.shift();
                     }
+                    addMessageToLog(packet);
                 }
             };
             
@@ -110,24 +166,12 @@
             connectEventSource();
         }
 
-        function formatTimestamp(timestamp) {
-            const date = new Date(timestamp * 1000);
-            return date.toLocaleTimeString();
-        }
-
         function draw() {
             // Update mouse position using p5.js variables
             mouseX = mouseX;  // p5.js automatically provides these variables
             mouseY = mouseY;
             
             background(26);
-            
-            // Add debug info
-            fill(255);
-            noStroke();
-            textAlign(LEFT, TOP);
-            text(`Mouse X: ${mouseX}`, 10, 70);
-            text(`Mouse Y: ${mouseY}`, 10, 90);
             
             // Draw grid
             stroke(40);
