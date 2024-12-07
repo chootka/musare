@@ -37,9 +37,58 @@ def decode_wsjtx_message(data):
         print(f"Magic: {magic}, Schema: {schema}, Pkt Type: {pkt_type}")
         
         if magic != FT8_MAGIC:
+            print(f"Invalid magic number: {magic}")
             return None
+
+        # Handle heartbeat packet (type 0)
+        if pkt_type == 0:
+            offset = 12
+            # Get ID string length
+            id_len = struct.unpack('>I', data[offset:offset+4])[0]
+            offset += 4
+            # Get ID string
+            id_str = data[offset:offset+id_len].decode('utf-8', errors='replace') if id_len > 0 else None
+            # Get maximum schema number
+            offset += id_len
+            max_schema = struct.unpack('>I', data[offset:offset+4])[0]
+            # Get version string length 
+            offset += 4
+            version_len = struct.unpack('>I', data[offset:offset+4])[0]
+            offset += 4
+            # Get version string
+            version = data[offset:offset+version_len].decode('utf-8', errors='replace') if version_len > 0 else None
             
-        if pkt_type == 2:  # Decode packet
+            return {
+                'callsign': id_str,
+                'raw_decode': f"Heartbeat from {version}"
+            }
+
+        # Handle status packet (type 1)
+        if pkt_type == 1:
+            offset = 12
+            # Skip the ID field (first string)
+            id_len = struct.unpack('>I', data[offset:offset+4])[0]
+            offset += 4 + id_len
+            # Get dial frequency
+            dial_freq = struct.unpack('>Q', data[offset:offset+8])[0]
+            offset += 8
+            # Get mode
+            mode_len = struct.unpack('>I', data[offset:offset+4])[0]
+            offset += 4
+            mode = data[offset:offset+mode_len].decode('utf-8', errors='replace')
+            offset += mode_len
+            # Get DX call
+            dx_call_len = struct.unpack('>I', data[offset:offset+4])[0]
+            offset += 4
+            dx_call = data[offset:offset+dx_call_len].decode('utf-8', errors='replace') if dx_call_len > 0 else None
+            
+            return {
+                'callsign': dx_call,
+                'raw_decode': f"Status: {mode} {dial_freq/1e6:.3f}MHz"
+            }
+            
+        # Handle decoded packet (type 2)
+        if pkt_type == 2:
             # Extract the decoded text from the message
             # Format varies by schema version, this is for schema 2
             offset = 12
@@ -67,7 +116,7 @@ def decode_wsjtx_message(data):
             # Get message
             msg_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
-            message = data[offset:offset+msg_len].decode('utf-8')
+            message = data[offset:offset+msg_len].decode('utf-8', errors='replace')
             
             # Try to extract callsign from the message
             # FT8 messages typically follow patterns like "CQ K1ABC" or "K1ABC K2XYZ"
@@ -87,6 +136,7 @@ def decode_wsjtx_message(data):
             
     except Exception as e:
         print(f"Error decoding WSJT-X message: {e}")
+        print(f"Raw data: {[hex(b) for b in data]}")  # Add hex dump for debugging
         return None
 
 def decode_js8_message(data):
