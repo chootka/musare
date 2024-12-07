@@ -13,46 +13,121 @@
         canvas {
             border: 1px solid #333;
         }
+        .toggle-container {
+            margin: 20px 0;
+        }
+        
+        .pill-toggle {
+            background: #333;
+            border-radius: 25px;
+            padding: 5px;
+            display: inline-flex;
+            border: 1px solid #444;
+        }
+        
+        .pill-toggle button {
+            border: none;
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            color: #fff;
+            background: transparent;
+            transition: background-color 0.3s;
+        }
+        
+        .pill-toggle button.active {
+            background: #4CAF50;
+        }
     </style>
 </head>
 <body>
     <h1>Musare</h1>
     <h3>HF >> Digital Packet Visualizer</h3>
+    <div class="toggle-container">
+        <div class="pill-toggle">
+            <button id="ft8-btn" class="active" onclick="switchMode('ft8')">FT8</button>
+            <button id="js8-btn" onclick="switchMode('js8')">JS8</button>
+        </div>
+    </div>
     <div id="sketch-holder"></div>
 
     <script>
         let packets = [];
         const maxPackets = 100;
+        let currentMode = 'ft8';
+        let eventSource;
+        let hoveredPacket = null;
+        let mouseX = 0;
+        let mouseY = 0;
         
-        function setup() {
-            const canvas = createCanvas(800, 400);
-            canvas.parent('sketch-holder');
-            background(26);
+        function switchMode(mode) {
+            if (currentMode === mode) return;
             
-            console.log("Setting up EventSource connection...");
-            const eventSource = new EventSource('/stream');
+            // Update button states
+            document.getElementById(`${currentMode}-btn`).classList.remove('active');
+            document.getElementById(`${mode}-btn`).classList.add('active');
+            
+            // Clear existing packets
+            packets = [];
+            
+            // Close existing EventSource
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            // Update current mode and reconnect
+            currentMode = mode;
+            connectEventSource();
+        }
+        
+        function connectEventSource() {
+            console.log(`Setting up EventSource connection for ${currentMode}...`);
+            eventSource = new EventSource(`/stream?mode=${currentMode}`);
             
             eventSource.onopen = function(event) {
                 console.log("EventSource connection opened");
             };
             
             eventSource.onmessage = function(event) {
-                console.log("Received packet data:", event.data);
                 const packet = JSON.parse(event.data);
-                packets.push(packet);
-                if (packets.length > maxPackets) {
-                    packets.shift();
+                if (packet.type === currentMode) {
+                    packets.push(packet);
+                    if (packets.length > maxPackets) {
+                        packets.shift();
+                    }
                 }
-                console.log("Total packets:", packets.length);
             };
             
             eventSource.onerror = function(event) {
                 console.error("EventSource error:", event);
             };
         }
+        
+        function setup() {
+            const canvas = createCanvas(800, 400);
+            canvas.parent('sketch-holder');
+            background(26);
+            connectEventSource();
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleTimeString();
+        }
 
         function draw() {
+            // Update mouse position using p5.js variables
+            mouseX = mouseX;  // p5.js automatically provides these variables
+            mouseY = mouseY;
+            
             background(26);
+            
+            // Add debug info
+            fill(255);
+            noStroke();
+            textAlign(LEFT, TOP);
+            text(`Mouse X: ${mouseX}`, 10, 70);
+            text(`Mouse Y: ${mouseY}`, 10, 90);
             
             // Draw grid
             stroke(40);
@@ -63,18 +138,34 @@
                 line(0, i, width, i);
             }
             
-            // Draw packets
+            // Draw packets and check hover
             noStroke();
             const packetWidth = width / maxPackets;
+            hoveredPacket = null;  // Reset hover state
             
             packets.forEach((packet, index) => {
                 const x = index * packetWidth;
                 const h = map(packet.size, 0, 1024, 0, height);
                 
+                // Check if mouse is over this packet
+                if (mouseX > x && mouseX < x + packetWidth && 
+                    mouseY > height - h && mouseY < height) {
+                    hoveredPacket = packet;
+                }
+                
                 // Create gradient based on packet size
                 const hue = map(packet.size, 0, 1024, 0, 360);
                 colorMode(HSB);
-                fill(hue, 80, 100, 0.7);
+                
+                // Highlight hovered packet
+                if (packet === hoveredPacket) {
+                    fill(hue, 80, 100, 0.9);  // More opaque when hovered
+                    stroke(255);
+                    strokeWeight(2);
+                } else {
+                    fill(hue, 80, 100, 0.7);
+                    noStroke();
+                }
                 
                 // Draw packet bar
                 rect(x, height - h, packetWidth - 1, h);
@@ -82,6 +173,7 @@
                 // Draw packet data points
                 if (packet.raw_data) {
                     stroke(hue, 80, 100);
+                    strokeWeight(1);
                     packet.raw_data.forEach((byte, byteIndex) => {
                         const byteY = map(byte, 0, 255, height, 0);
                         const byteX = x + (packetWidth * byteIndex / packet.raw_data.length);
@@ -99,6 +191,23 @@
             if (packets.length > 0) {
                 const latestPacket = packets[packets.length - 1];
                 text(`Latest packet size: ${latestPacket.size} bytes`, 10, 50);
+            }
+            
+            // Draw hover tooltip
+            if (hoveredPacket) {
+                const tooltipX = mouseX + 10;
+                const tooltipY = mouseY - 60;
+                
+                // Draw tooltip background
+                fill(0, 0, 0, 0.8);
+                noStroke();
+                rect(tooltipX - 5, tooltipY - 5, 200, 50, 5);
+                
+                // Draw tooltip text
+                fill(255);
+                textAlign(LEFT, TOP);
+                text(`Time: ${formatTimestamp(hoveredPacket.timestamp)}`, tooltipX, tooltipY);
+                text(`Size: ${hoveredPacket.size} bytes`, tooltipX, tooltipY + 20);
             }
         }
     </script>

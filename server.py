@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, Response, render_template
+from flask import Flask, jsonify, Response, render_template, request
 import socket
 import json
 from datetime import datetime
@@ -8,7 +8,8 @@ import time
 
 app = Flask(__name__)
 message_queue = Queue()
-latest_packets = []
+ft8_packets = []
+js8_packets = []
 JS8_PORT = 2242
 FT8_PORT = 2237
 
@@ -27,36 +28,51 @@ def load_sample_data():
 
 def listen_for_packets():
     try:
-        print("Starting listener...")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        print(f"Socket: {sock}")
-        sock.bind(('0.0.0.0', FT8_PORT))
-        print("Connected to UDP server successfully")
+        print("Starting listeners...")
+        ft8_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        js8_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        ft8_sock.bind(('0.0.0.0', FT8_PORT))
+        js8_sock.bind(('0.0.0.0', JS8_PORT))
+        print("Connected to UDP servers successfully")
         
         while True:
             try:
-                print("Receiving data...")
-                data = sock.recv(1024)
-                print(f"Received data: {data}")
+                # FT8 packets
+                ft8_data = ft8_sock.recv(1024)
                 timestamp = datetime.now().timestamp()
-                packet_data = {
+                ft8_packet = {
+                    'type': 'ft8',
                     'timestamp': timestamp,
-                    'raw_data': [b for b in data],
-                    'size': len(data)
+                    'raw_data': [b for b in ft8_data],
+                    'size': len(ft8_data)
                 }
-                print(f"Packet data: {packet_data}")
-                latest_packets.append(packet_data)
-                if len(latest_packets) > 100:
-                    latest_packets.pop(0)
-                message_queue.put(packet_data)
-                print(f"Received UDP packet: size={len(data)} bytes")
+                print(f"FT8 Packet data: {ft8_packet}")
+                ft8_packets.append(ft8_packet)
+                if len(ft8_packets) > 100:
+                    ft8_packets.pop(0)
+                message_queue.put(ft8_packet)
+                
+                # JS8 packets
+                js8_data = js8_sock.recv(1024)
+                timestamp = datetime.now().timestamp()
+                js8_packet = {
+                    'type': 'js8',
+                    'timestamp': timestamp,
+                    'raw_data': [b for b in js8_data],
+                    'size': len(js8_data)
+                }
+                print(f"JS8 Packet data: {js8_packet}")
+                js8_packets.append(js8_packet)
+                if len(js8_packets) > 100:
+                    js8_packets.pop(0)
+                message_queue.put(js8_packet)
+                
             except Exception as e:
                 print(f"Error receiving data: {e}")
                 time.sleep(1)
     except Exception as e:
-        print(f"Could not set up UDP listener: {e}")
-        # print("Falling back to sample data...")
-        # load_sample_data()
+        print(f"Could not set up UDP listeners: {e}")
 
 @app.route('/')
 def index():
@@ -64,15 +80,23 @@ def index():
 
 @app.route('/stream')
 def stream():
+    mode = request.args.get('mode', 'ft8')
+    
     def generate():
         while True:
-            print("Generating packet...")
             packet = message_queue.get()
-            print(f"Packet: {packet}")
-            print(f"Sending packet: size={packet['size']}")
-            yield f"data: {json.dumps(packet)}\n\n"
+            if packet['type'] == mode:
+                yield f"data: {json.dumps(packet)}\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/ft8')
+def get_ft8_packets():
+    return jsonify(ft8_packets)
+
+@app.route('/js8')
+def get_js8_packets():
+    return jsonify(js8_packets)
 
 if __name__ == '__main__':
     print("Starting server...")
