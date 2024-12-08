@@ -70,6 +70,14 @@
         .message .content {
             color: #fff;
         }
+        
+        .message-log .message.type-0 {
+            background-color: rgba(175, 76, 92, 0.2);  /* red with transparency */
+        }
+        
+        .message-log .message.type-1 {
+            background-color: rgba(33, 150, 243, 0.2);  /* Blue with transparency */
+        }
     </style>
 </head>
 <body>
@@ -92,6 +100,8 @@
         let hoveredPacket = null;
         let mouseX = 0;
         let mouseY = 0;
+        const gridSize = 20;
+        let heatmap = [];
         
         function switchMode(mode) {
             if (currentMode === mode) return;
@@ -121,7 +131,7 @@
         function addMessageToLog(packet) {
             const log = document.getElementById('message-log');
             const message = document.createElement('div');
-            message.className = 'message';
+            message.className = `message${packet.pkt_type !== undefined ? ` type-${packet.pkt_type}` : ''}`;
             message.innerHTML = `
                 <span class="time">${formatTimestamp(packet.timestamp)}</span>
                 <span class="callsign">${packet.callsign || 'UNKNOWN'}</span>
@@ -145,12 +155,16 @@
             
             eventSource.onmessage = function(event) {
                 const packet = JSON.parse(event.data);
+                console.log("Received packet in browser:", packet);
                 if (packet.type === currentMode) {
                     packets.push(packet);
                     if (packets.length > maxPackets) {
                         packets.shift();
                     }
+                    updateHeatmap(packet);
                     addMessageToLog(packet);
+                    console.log("Current packets length:", packets.length);
+                    console.log("Active cells:", countActiveCells());
                 }
             };
             
@@ -159,10 +173,61 @@
             };
         }
         
+        function updateHeatmap(packet) {
+            if (!packet.size) {
+                console.log("Packet has no size:", packet);
+                return;
+            }
+            
+            console.log("Updating heatmap with packet:", packet);
+            
+            // Increase the intensity range
+            const intensity = map(packet.size, 0, 1024, 20, 100);
+            const x = floor(random(width/gridSize));
+            const y = floor(random(height/gridSize));
+            
+            console.log(`Adding heat at (${x},${y}) with intensity ${intensity}`);
+            
+            // Add more heat to cells
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx >= 0 && nx < width/gridSize && 
+                        ny >= 0 && ny < height/gridSize) {
+                        const distance = sqrt(dx*dx + dy*dy);
+                        const spreadIntensity = intensity * (1 - distance/2);
+                        heatmap[nx][ny] = min(100, heatmap[nx][ny] + spreadIntensity * 2);
+                    }
+                }
+            }
+        }
+        
+        function countActiveCells() {
+            let count = 0;
+            for (let x = 0; x < width/gridSize; x++) {
+                for (let y = 0; y < height/gridSize; y++) {
+                    if (heatmap[x][y] > 0) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+        
         function setup() {
             const canvas = createCanvas(800, 400);
             canvas.parent('sketch-holder');
             background(26);
+            
+            // Initialize heatmap array
+            for (let x = 0; x < width/gridSize; x++) {
+                heatmap[x] = [];
+                for (let y = 0; y < height/gridSize; y++) {
+                    heatmap[x][y] = 0;
+                }
+            }
+            
             connectEventSource();
         }
 

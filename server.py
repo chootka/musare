@@ -15,24 +15,36 @@ JS8_PORT = 2242
 WSJTX_PORT = 2237  # Default WSJT-X UDP port
 FT8_MAGIC = 0xadbccbda  # WSJT-X magic number
 JS8_MAGIC = 0x2a4d5347  # JS8Call magic number
-SCHEMA = 2  # Current schema version
 
-def load_sample_data():
-    try:
-        with open('data/sample_packets.json', 'r') as f:
-            data = json.load(f)
-            print(f"Loaded {len(data['packets'])} sample packets")
-            for packet in data['packets']:
-                message_queue.put(packet)
-                time.sleep(0.5)
-            print("Finished loading sample data")
-    except Exception as e:
-        print(f"Error loading sample data: {e}")
+def clean_text(text):
+    if not text:
+        return text
+        
+    # Replace common problematic characters
+    replacements = {
+        '~': '',      # Remove tilde
+        '\x00': '',   # Remove null bytes
+        '\xff': '',   # Remove xFF bytes
+        '\xc2': '',   # Remove common UTF-8 artifacts
+        '\xa0': ' ',  # Replace non-breaking space with regular space
+    }
+    
+    # Clean the text
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Remove any remaining non-printable characters
+    text = ''.join(char for char in text if char.isprintable() or char.isspace())
+    
+    # Remove multiple spaces
+    text = ' '.join(text.split())
+    
+    return text.strip()
 
 def decode_wsjtx_message(data):
     try:
-        # Unpack the header
-        magic, schema, pkt_type = struct.unpack('>IIL', data[:12])
+        # Unpack the header using three unsigned ints
+        magic, schema, pkt_type = struct.unpack('>III', data[:12])
 
         print(f"Magic: {magic}, Schema: {schema}, Pkt Type: {pkt_type}")
         
@@ -47,7 +59,7 @@ def decode_wsjtx_message(data):
             id_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
             # Get ID string
-            id_str = data[offset:offset+id_len].decode('utf-8', errors='replace') if id_len > 0 else None
+            id_str = clean_text(data[offset:offset+id_len].decode('utf-8', errors='replace')) if id_len > 0 else None
             # Get maximum schema number
             offset += id_len
             max_schema = struct.unpack('>I', data[offset:offset+4])[0]
@@ -56,15 +68,16 @@ def decode_wsjtx_message(data):
             version_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
             # Get version string
-            version = data[offset:offset+version_len].decode('utf-8', errors='replace') if version_len > 0 else None
+            version = clean_text(data[offset:offset+version_len].decode('utf-8', errors='replace')) if version_len > 0 else None
             
             return {
                 'callsign': id_str,
-                'raw_decode': f"Heartbeat from {version}"
+                'raw_decode': f"Heartbeat from {version}",
+                'pkt_type': pkt_type
             }
 
         # Handle status packet (type 1)
-        if pkt_type == 1:
+        elif pkt_type == 1:
             offset = 12
             # Skip the ID field (first string)
             id_len = struct.unpack('>I', data[offset:offset+4])[0]
@@ -75,20 +88,21 @@ def decode_wsjtx_message(data):
             # Get mode
             mode_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
-            mode = data[offset:offset+mode_len].decode('utf-8', errors='replace')
+            mode = clean_text(data[offset:offset+mode_len].decode('utf-8', errors='replace'))
             offset += mode_len
             # Get DX call
             dx_call_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
-            dx_call = data[offset:offset+dx_call_len].decode('utf-8', errors='replace') if dx_call_len > 0 else None
+            dx_call = clean_text(data[offset:offset+dx_call_len].decode('utf-8', errors='replace')) if dx_call_len > 0 else None
             
             return {
                 'callsign': dx_call,
-                'raw_decode': f"Status: {mode} {dial_freq/1e6:.3f}MHz"
+                'raw_decode': f"Status: {mode} {dial_freq/1e6:.3f}MHz",
+                'pkt_type': pkt_type
             }
             
         # Handle decoded packet (type 2)
-        if pkt_type == 2:
+        elif pkt_type == 2:
             # Extract the decoded text from the message
             # Format varies by schema version, this is for schema 2
             offset = 12
@@ -116,7 +130,7 @@ def decode_wsjtx_message(data):
             # Get message
             msg_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
-            message = data[offset:offset+msg_len].decode('utf-8', errors='replace')
+            message = clean_text(data[offset:offset+msg_len].decode('utf-8', errors='replace'))
             
             # Try to extract callsign from the message
             # FT8 messages typically follow patterns like "CQ K1ABC" or "K1ABC K2XYZ"
@@ -131,8 +145,12 @@ def decode_wsjtx_message(data):
                 
             return {
                 'callsign': callsign,
-                'raw_decode': message
+                'raw_decode': message,
+                'pkt_type': pkt_type
             }
+        else:
+            print(f"Unknown packet type: {pkt_type}")
+            return None
             
     except Exception as e:
         print(f"Error decoding WSJT-X message: {e}")
@@ -153,7 +171,7 @@ def decode_js8_message(data):
             msg_len = struct.unpack('>I', data[offset:offset+4])[0]
             offset += 4
             # Get the actual message
-            message = data[offset:offset+msg_len].decode('utf-8')
+            message = clean_text(data[offset:offset+msg_len].decode('utf-8', errors='replace'))
             
             # JS8 messages often have format "@CALLSIGN: message" or "CALLSIGN: message"
             parts = message.split(':')[0].strip('@').strip()
@@ -174,56 +192,82 @@ def listen_for_packets():
         wsjtx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         js8_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
+        # Set non-blocking mode
+        wsjtx_sock.setblocking(False)
+        js8_sock.setblocking(False)
+        
         wsjtx_sock.bind(('0.0.0.0', WSJTX_PORT))
         js8_sock.bind(('0.0.0.0', JS8_PORT))
-        print("Connected to UDP servers successfully")
+        print("Connected to UDP servers successfully on ports {} and {}".format(WSJTX_PORT, JS8_PORT))
         
         while True:
+            # Check FT8
             try:
-                # FT8 packets
                 data, addr = wsjtx_sock.recvfrom(1024)
-                timestamp = datetime.now().timestamp()
-
-                print(f"Received FT8 data: {data}")
+                print(f"Received FT8 UDP data from {addr}: {len(data)} bytes")
+                print(f"Raw data: {[hex(b) for b in data]}")
                 
+                # First decode the message
                 decoded = decode_wsjtx_message(data)
-                if decoded:
-                    packet = {
-                        'type': 'ft8',
-                        'timestamp': timestamp,
-                        'raw_data': [b for b in data],
-                        'size': len(data),
-                        'callsign': decoded['callsign'],
-                        'decoded': decoded['raw_decode']
-                    }
-                    print(f"Received FT8 packet: {packet}")
-                    ft8_packets.append(packet)
-                    if len(ft8_packets) > 100:
-                        ft8_packets.pop(0)
-                    message_queue.put(packet)
                 
-                # JS8 packets
-                data, addr = js8_sock.recvfrom(1024)
+                # Then create the raw packet using the decoded result
                 timestamp = datetime.now().timestamp()
+                raw_packet = {
+                    'type': 'ft8',
+                    'timestamp': timestamp,
+                    'raw_data': [b for b in data],
+                    'size': len(data),
+                    'callsign': 'UNKNOWN',
+                    'decoded': 'Raw Packet',
+                    'pkt_type': decoded.get('pkt_type') if decoded else None
+                }
+                
+                # Update packet with decoded information if available
+                if decoded:
+                    raw_packet['callsign'] = decoded['callsign']
+                    raw_packet['decoded'] = decoded['raw_decode']
+                
+                ft8_packets.append(raw_packet)
+                if len(ft8_packets) > 100:
+                    ft8_packets.pop(0)
+                message_queue.put(raw_packet)
+            except BlockingIOError:
+                pass  # No FT8 data available
+            except Exception as e:
+                print(f"Error receiving FT8 data: {e}")
+            
+            # Check JS8
+            try:
+                data, addr = js8_sock.recvfrom(1024)
+                print(f"Received JS8 UDP data from {addr}: {len(data)} bytes")
+                print(f"Raw JS8 data: {[hex(b) for b in data]}")
+                
+                timestamp = datetime.now().timestamp()
+                raw_packet = {
+                    'type': 'js8',
+                    'timestamp': timestamp,
+                    'raw_data': [b for b in data],
+                    'size': len(data),
+                    'callsign': 'UNKNOWN',
+                    'decoded': 'Raw Packet'
+                }
                 
                 decoded = decode_js8_message(data)
                 if decoded:
-                    packet = {
-                        'type': 'js8',
-                        'timestamp': timestamp,
-                        'raw_data': [b for b in data],
-                        'size': len(data),
-                        'callsign': decoded['callsign'],
-                        'decoded': decoded['raw_decode']
-                    }
-                    js8_packets.append(packet)
-                    if len(js8_packets) > 100:
-                        js8_packets.pop(0)
-                    message_queue.put(packet)
-                    
+                    raw_packet['callsign'] = decoded['callsign']
+                    raw_packet['decoded'] = decoded['raw_decode']
+                
+                js8_packets.append(raw_packet)
+                if len(js8_packets) > 100:
+                    js8_packets.pop(0)
+                message_queue.put(raw_packet)
+            except BlockingIOError:
+                pass  # No JS8 data available
             except Exception as e:
-                print(f"Error receiving data: {e}")
-                time.sleep(1)
+                print(f"Error receiving JS8 data: {e}")
+            
+            # Small sleep to prevent CPU spinning
+            time.sleep(0.001)
                 
     except Exception as e:
         print(f"Could not set up UDP listeners: {e}")
@@ -235,10 +279,12 @@ def index():
 @app.route('/stream')
 def stream():
     mode = request.args.get('mode', 'ft8')
+    print(f"New client connected, requesting mode: {mode}")
     
     def generate():
         while True:
             packet = message_queue.get()
+            print(f"Sending packet to client: {packet}")
             if packet['type'] == mode:
                 yield f"data: {json.dumps(packet)}\n\n"
     
